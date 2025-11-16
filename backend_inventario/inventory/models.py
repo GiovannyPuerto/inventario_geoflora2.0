@@ -27,14 +27,8 @@ class InventoryRecord(models.Model):
     MOVEMENT_TYPES = [
         ('EA', 'Entrada'),
         ('SA', 'Salida'),
+        ('GF', 'Entrada'),
     ]
-    MOVEMENT_TYPES = [
-        ('1','AGROQUIMICOS-FERTILIZANTES Y ABONOS'),
-        ('2','DOTACION Y SEGURIDAD'),
-        ('3','MANTENIMIENTO'),
-        ('4','MATERIAL DE EMPAQUE'),
-        ('5','PAPELERIA Y ASEO'),
-         ]
 
     batch = models.ForeignKey(ImportBatch, on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
@@ -48,6 +42,7 @@ class InventoryRecord(models.Model):
     category = models.CharField(max_length=128, blank=True)  # Mapped category
     lote = models.CharField(max_length=64, blank=True)  # Batch/lot tracking
     final_quantity = models.DecimalField(max_digits=18, decimal_places=3, null=True, blank=True)  # Cantidad final después del movimiento
+    cost_center = models.CharField(max_length=64, null=True, blank=True)  # Centro de costo
 
     class Meta:
         unique_together = ['document_type', 'document_number', 'product', 'batch']  # Prevent duplicate documents

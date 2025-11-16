@@ -10,7 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists
+from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists, Min
 from django.db.models.functions import Coalesce, TruncMonth
 
 from .models import ImportBatch, Product, InventoryRecord
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@transaction.atomic
 def update_inventory(request, inventory_name='default'):
     #Manejo de error en caso de que el usuario no envie el .xlsx
     try:
@@ -36,10 +35,10 @@ def update_inventory(request, inventory_name='default'):
         if base_file:
             base_content = base_file.read()
 
-        update_file = request.FILES.get('update_file')
+        update_files = request.FILES.getlist('update_files')
         update_content = b''
-        if update_file:
-            update_content = update_file.read()
+        for update_file in update_files:
+            update_content += update_file.read()
 
         # Check if base file has been uploaded before
         has_base_data = Product.objects.filter(inventory_name=inventory_name).exists()
@@ -58,13 +57,13 @@ def update_inventory(request, inventory_name='default'):
             )
 
         # For update files, ensure we have base data
-        if update_file and not has_base_data:
+        if update_files and not has_base_data:
             return JsonResponse(
                 {'ok': False, 'error': 'Debe cargar el archivo base antes de cargar archivos de actualización'},
                 status=400
             )
 
-        if not base_file and not update_file:
+        if not base_file and not update_files:
             return JsonResponse(
                 {'ok': False, 'error': 'Debe proporcionar un archivo (base para inicialización o actualización)'},
                 status=400
@@ -77,17 +76,32 @@ def update_inventory(request, inventory_name='default'):
             # Leemos el archivo base con nombres de columnas específicos
             base_df = None
             if base_file is not None:
-                base_df = pd.read_excel(
-                    io.BytesIO(base_content),
-                    header=0,  # Row 1 contains headers
-                    usecols='A:J',  # Columns A to J (0-9)
-                    names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
-                    dtype={
-                        'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
-                        'codigo': str, 'descripcion': str, 'cantidad': float,
-                        'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
-                    }
-                )
+                # Support both .xlsx and .xls formats
+                if base_file.name.endswith('.xls'):
+                    base_df = pd.read_excel(
+                        io.BytesIO(base_content),
+                        engine='xlrd',
+                        header=0,  # Row 1 contains headers
+                        usecols='A:J',  # Columns A to J (0-9)
+                        names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
+                        dtype={
+                            'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
+                            'codigo': str, 'descripcion': str, 'cantidad': float,
+                            'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
+                        }
+                    )
+                else:
+                    base_df = pd.read_excel(
+                        io.BytesIO(base_content),
+                        header=0,  # Row 1 contains headers
+                        usecols='A:J',  # Columns A to J (0-9)
+                        names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
+                        dtype={
+                            'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
+                            'codigo': str, 'descripcion': str, 'cantidad': float,
+                            'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
+                        }
+                    )
 
             # datamanejamos los datos para que no sean nulos
             if base_df is not None:
@@ -170,8 +184,8 @@ def update_inventory(request, inventory_name='default'):
         batch_file_names = []
         if base_file:
             batch_file_names.append(base_file.name)
-        if update_file:
-            batch_file_names.append(update_file.name)
+        if update_files:
+            batch_file_names.extend([f.name for f in update_files])
 
         # Check if batch with same checksum already exists and delete it to allow re-import
         existing_batch = ImportBatch.objects.filter(
@@ -197,10 +211,60 @@ def update_inventory(request, inventory_name='default'):
             # procesamos el archivo base
             base_records_count = _process_base_file(base_df, inventory_name)
 
-        # Procesamos el archivo de actualizacion (solo si hay archivo de actualizacion)
+        # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0
-        if update_df is not None:
-            update_records_count = _process_update_file(batch, update_df, inventory_name)
+        if update_files:
+            for update_file in update_files:
+                update_content = update_file.read()
+                update_df = pd.read_excel(
+                    io.BytesIO(update_content),
+                    header=3,  # Row 4 contains headers (index 3)
+                    usecols=[0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21],  # A, C, D, E, N, O, R, S, T, U, V
+                    names=[
+                        'item', 'desc_item', 'localizacion', 'categoria',
+                        'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad'
+                    ],
+                    dtype={
+                        'item': str, 'desc_item': str, 'localizacion': str, 'categoria': str,
+                        'fecha': str, 'documento': str, 'entradas': float, 'salidas': float,
+                        'unitario': float, 'total': float
+                    }
+                )
+
+                logger.info(f"Update DF shape: {update_df.shape}")
+                logger.info(f"Update DF columns: {list(update_df.columns)}")
+                logger.info(f"Update DF head: \n{update_df.head().to_string()}")
+
+                # Convertir fecha de YYYYMMDD a formato legible
+                update_df['fecha'] = update_df['fecha'].astype(str).str.strip()
+                update_df['fecha'] = update_df['fecha'].apply(lambda x: f"{x[:4]}-{x[4:6]}-{x[6:]}" if len(x) == 8 and x.isdigit() else x)
+
+                # Limpiar documento: extraer solo SA/EA y número
+                update_df['documento'] = update_df['documento'].astype(str).str.strip()
+                update_df['documento'] = update_df['documento'].apply(lambda x: re.sub(r'^[^SAEA]*?(SA|EA)', r'\1', x.upper()) if x else x)
+
+                # Limpiamos datos basura como celdas vacías o nulos
+                update_df = update_df.dropna(subset=['item'])  # Remove rows with no code
+                update_df['item'] = update_df['item'].astype(str).str.strip()
+
+                # Limpiar las columnas 'entradas' y 'salidas' para manejar valores decimales
+                update_df['entradas'] = update_df['entradas'].astype(str).str.strip()
+                update_df['entradas'] = update_df['entradas'].str.replace(',', '.', regex=False)
+                update_df['entradas'] = update_df['entradas'].str.replace('[^0-9.-]', '', regex=True)
+                update_df['entradas'] = pd.to_numeric(update_df['entradas'], errors='coerce').fillna(0)
+
+                update_df['salidas'] = update_df['salidas'].astype(str).str.strip()
+                update_df['salidas'] = update_df['salidas'].str.replace(',', '.', regex=False)
+                update_df['salidas'] = update_df['salidas'].str.replace('[^0-9.-]', '', regex=True)
+                update_df['salidas'] = pd.to_numeric(update_df['salidas'], errors='coerce').fillna(0)
+
+                # Limpiar la columna 'cantidad' para manejar valores no numéricos
+                update_df['cantidad'] = update_df['cantidad'].astype(str).str.strip()
+                update_df['cantidad'] = update_df['cantidad'].str.replace(',', '.', regex=False)
+                update_df['cantidad'] = update_df['cantidad'].str.replace('[^0-9.-]', '', regex=True)
+                update_df['cantidad'] = pd.to_numeric(update_df['cantidad'], errors='coerce').fillna(0)
+
+                update_records_count += _process_update_file(batch, update_df, inventory_name)
 
         total_imported = base_records_count + update_records_count
 
@@ -210,7 +274,7 @@ def update_inventory(request, inventory_name='default'):
 
         # Cargamos la informacion del lote
         base_rows = len(base_df) if base_df is not None else 0
-        update_rows = len(update_df) if update_df is not None else 0
+        update_rows = 0
         batch.rows_imported = total_imported
         batch.rows_total = base_rows + update_rows
         batch.processed_at = timezone.now()
@@ -255,69 +319,95 @@ def _process_base_file(df, inventory_name):
     df['codigo'] = df['codigo'].astype(str).str.strip()
     df['descripcion'] = df['descripcion'].astype(str).str.strip()
 
-    # remover duplicados por codigo, mantener el primero
-    df = df.drop_duplicates(subset=['codigo'], keep='first')
-
     # Filtrar productos sin descripción válida
     df = df[df['descripcion'].notna() & (df['descripcion'].str.strip() != '')]
-    
+
+    # Agrupar por código de producto para sumar cantidades y valores de productos repetidos en diferentes almacenes
+    df_grouped = df.groupby(['codigo', 'descripcion', 'grupo']).agg({
+        'cantidad': 'sum',
+        'valor_total': 'sum',
+        'costo_unitario': 'last',  # Tomar el último costo unitario del archivo base
+        'almacen': lambda x: ', '.join(sorted(set(x))),  # Concatenar almacenes únicos
+        'fecha_corte': 'first',
+        'mes': 'first',
+        'unidad_medida': 'first'
+    }).reset_index()
+
+    # El costo unitario ya es el último del archivo base, no necesitamos calcular promedio
+    df_grouped['costo_unitario_promedio'] = df_grouped['costo_unitario']
+
+    # Crear un DataFrame con información detallada por almacén para productos agrupados
+    # Esto permitirá filtrar por almacén en el frontend
+    warehouse_details = []
+    for _, group in df.groupby(['codigo']):
+        for _, row in group.iterrows():
+            warehouse_details.append({
+                'codigo': row['codigo'],
+                'almacen': row['almacen'],
+                'cantidad': row['cantidad'],
+                'valor_total': row['valor_total']
+            })
+
+    # Convertir a DataFrame para facilitar consultas posteriores
+    warehouse_df = pd.DataFrame(warehouse_details)
+
     # traer todos los codigos de productos existentes de una vez para reducir consultas a la base de datos
     existing_codes = set(Product.objects.filter(
         inventory_name=inventory_name
     ).values_list('code', flat=True))
-    
-    # Preparar cada fila
-    for _, row in df.iterrows():
+
+    # Preparar cada fila agrupada
+    for _, row in df_grouped.iterrows():
         try:
             codigo = row['codigo']
             if not codigo or codigo in processed_codes or codigo in existing_codes:
                 continue
-                
-            # traer valores de la fila
-            cantidad = float(row.get('cantidad', 0)) or 0
-            costo_unitario = float(row.get('costo_unitario', 0)) or 0
+
+            # traer valores de la fila agrupada
+            cantidad_total = float(row.get('cantidad', 0)) or 0
+            costo_unitario_promedio = float(row.get('costo_unitario_promedio', 0)) or 0
             descripcion = row.get('descripcion', '').strip()
-            
+
             if not descripcion:
                 logger.warning(f"Producto con código {codigo} sin descripción, se omitirá")
                 continue
-                
+
             products_to_create.append(Product(
                 code=codigo,
                 description=descripcion,
                 group=map_categoria(str(row.get('grupo', '')).strip()),
                 inventory_name=inventory_name,
-                initial_balance=cantidad,
-                initial_unit_cost=costo_unitario
+                initial_balance=cantidad_total,
+                initial_unit_cost=costo_unitario_promedio
             ))
-            
+
             processed_codes.add(codigo)
             records_processed += 1
-            
+
             # INSERTAMOS EN BLOQUE DE 500
             if len(products_to_create) >= 500:
                 Product.objects.bulk_create(products_to_create, ignore_conflicts=True)
                 products_to_create = []
-                
+
         except Exception as e:
             errors += 1
             logger.error(f"Error procesando producto {row.get('codigo', '')}: {str(e)}")
             continue
-    
+
     # Insertamos los productos restantes
     if products_to_create:
         try:
             Product.objects.bulk_create(products_to_create, ignore_conflicts=True)
         except Exception as e:
             logger.error(f"Error en bulk_create: {str(e)}")
-            # indivudual insertamos los productos restantes
+            # individual insertamos los productos restantes
             for product in products_to_create:
                 try:
                     product.save(force_insert=True)
                     records_processed += 1
                 except:
                     continue
-    
+
     logger.info(f"Procesados {records_processed} productos del archivo base ({errors} errores)")
     return records_processed
 
@@ -333,7 +423,7 @@ def _process_update_file(batch, df, inventory_name):
     if not all(col in df.columns for col in required_columns):
         logger.error(f"Faltan columnas requeridas en el archivo de actualización: {required_columns}")
         return 0
-    
+
     # Limpiamos y validamos los datos del dataframe
     df = df.dropna(subset=['item', 'fecha', 'documento'])
     df['item'] = df['item'].astype(str).str.strip()
@@ -358,36 +448,35 @@ def _process_update_file(batch, df, inventory_name):
         # Para archivos de actualización, permitimos productos que no existen en base
         # pero los creamos con saldo inicial 0 (solo para movimientos históricos)
         # Usamos una transacción separada para asegurar que los productos se guarden incluso si falla el procesamiento de registros
-        with transaction.atomic():
-            for missing_code in missing_products:
-                try:
-                    # Buscar la primera fila de este producto para obtener descripción y categoría
-                    product_row = df[df['item'] == missing_code].iloc[0] if len(df[df['item'] == missing_code]) > 0 else None
-                    if product_row is not None:
-                        Product.objects.create(
-                            code=missing_code,
-                            description=product_row.get('desc_item', f'Producto {missing_code}').strip(),
-                            group=map_categoria(str(product_row.get('categoria', '')).strip()),
-                            inventory_name=inventory_name,
-                            initial_balance=0,
-                            initial_unit_cost=0
-                        )
-                        products[missing_code] = Product.objects.get(code=missing_code, inventory_name=inventory_name)
-                        new_products_count += 1
-                        print(f"Creado producto faltante: {missing_code}")
-                        logger.info(f"Creado producto faltante: {missing_code}")
-                except Exception as e:
-                    logger.error(f"Error creando prventarioducto faltante {missing_code}: {str(e)}")
-                    # Filtrar filas de productos que no se pudieron crear
-                    df = df[df['item'] != missing_code]
-    
+        for missing_code in missing_products:
+            try:
+                # Buscar la primera fila de este producto para obtener descripción y categoría
+                product_row = df[df['item'] == missing_code].iloc[0] if len(df[df['item'] == missing_code]) > 0 else None
+                if product_row is not None:
+                    Product.objects.create(
+                        code=missing_code,
+                        description=product_row.get('desc_item', f'Producto {missing_code}').strip(),
+                        group=map_categoria(str(product_row.get('categoria', '')).strip()),
+                        inventory_name=inventory_name,
+                        initial_balance=0,
+                        initial_unit_cost=0
+                    )
+                    products[missing_code] = Product.objects.get(code=missing_code, inventory_name=inventory_name)
+                    new_products_count += 1
+                    print(f"Creado producto faltante: {missing_code}")
+                    logger.info(f"Creado producto faltante: {missing_code}")
+            except Exception as e:
+                logger.error(f"Error creando producto faltante {missing_code}: {str(e)}")
+                # Filtrar filas de productos que no se pudieron crear
+                df = df[df['item'] != missing_code]
+
     # Procesamos cada una de las filas
     for idx, row in df.iterrows():
         try:
             codigo = row['item']
             if not codigo:
                 continue
-                
+
             # El producto debe existir (ya sea del base o creado arriba)
             if codigo not in products:
                 logger.warning(f"Producto {codigo} no encontrado en base de datos, omitiendo")
@@ -395,7 +484,7 @@ def _process_update_file(batch, df, inventory_name):
                 continue
 
             product = products[codigo]
-            
+
             # Documento information - usar el documento ya limpiado
             doc_info = str(row.get('documento', ''))
             if doc_info and len(doc_info) >= 2:
@@ -403,7 +492,7 @@ def _process_update_file(batch, df, inventory_name):
                 doc_number = doc_info[2:]  # número restante
             else:
                 doc_type, doc_number = None, None
-            
+
             # Get quantities - usar la columna 'cantidad' como cantidad final después del movimiento
             try:
                 final_quantity = float(row.get('cantidad', 0)) if pd.notna(row.get('cantidad')) else 0
@@ -444,14 +533,15 @@ def _process_update_file(batch, df, inventory_name):
                     unit_cost=unit_cost,
                     total=total,
                     category=map_categoria(str(row.get('categoria', '')).strip()),
-                    final_quantity=final_quantity
+                    final_quantity=final_quantity,
+                    cost_center=str(row.get('cost_center', '')).strip() if pd.notna(row.get('cost_center')) else None
                 ))
 
                 # No actualizamos información del producto desde archivo de actualización
                 # Solo registramos los movimientos
-                
+
                 records_processed += 1
-                
+
                 # INSERTAMOS EN BLOQUES DE 500
                 if len(records_to_create) >= 500:
                     try:
@@ -467,17 +557,17 @@ def _process_update_file(batch, df, inventory_name):
                                 logger.error(f"Error saving individual record: {str(e2)}")
                                 continue
                         records_to_create = []
-                
+
             except (ValueError, TypeError) as e:
                 logger.warning(f"Error en valores numéricos en fila {idx}: {str(e)}")
                 errors += 1
                 continue
-                
+
         except Exception as e:
             logger.error(f"Error inesperado al procesar fila {idx}: {str(e)}")
             errors += 1
             continue
-    
+
     # INSERTAMOS LOS REGISTROS RESTANTES
     if records_to_create:
         try:
@@ -491,7 +581,7 @@ def _process_update_file(batch, df, inventory_name):
                 except Exception as e2:
                     logger.error(f"Error saving final individual record: {str(e2)}")
                     continue
-    
+
     logger.info(f"Procesados {records_processed} registros de movimientos ({errors} errores)")
     return records_processed
 
@@ -514,17 +604,32 @@ def get_product_analysis(request):
 
         # ANOTAMOS LOS CAMPOS NECESARIOS
         products = products_query.annotate(
-            # CALCULAR STOCK ACTUAL: SALDO INICIAL + SUMA DE TODOS LOS MOVIMIENTOS (ENTRADAS - SALIDAS)
-            current_stock=F('initial_balance') + Coalesce(
+            # CALCULAR STOCK ACTUAL: TOMAR EL ÚLTIMO REGISTRO DEL CAMPO CANTIDAD
+            # PERO PARA SALIDAS CON MISMO DOCUMENTO Y FECHA, TOMAR LA CANTIDAD MÍNIMA
+            current_stock=Coalesce(
+                Subquery(
+                    # Para salidas (quantity < 0) con mismo documento y fecha, tomar el mínimo
+                    InventoryRecord.objects.filter(
+                        product=OuterRef('pk'),
+                        quantity__lt=0
+                    ).exclude(
+                        document_type__isnull=True
+                    ).exclude(
+                        document_number__isnull=True
+                    ).values('document_type', 'document_number', 'date').annotate(
+                        min_quantity=Min('final_quantity')
+                    ).order_by('-date', 'document_type', 'document_number').values('min_quantity')[:1],
+                    output_field=DecimalField()
+                ),
+                # Si no hay salidas agrupadas, tomar el último registro general
                 Subquery(
                     InventoryRecord.objects.filter(
                         product=OuterRef('pk')
-                    ).values('product').annotate(
-                        total_quantity=Sum('quantity')
-                    ).values('total_quantity')[:1],
+                    ).order_by('-date', '-id').values('final_quantity')[:1],
                     output_field=DecimalField()
                 ),
-                Decimal('0')
+                F('initial_balance'),
+                output_field=DecimalField()
             ),
             # OBTENER EL ÚLTIMO COSTO UNITARIO
             latest_unit_cost=Subquery(
@@ -541,8 +646,8 @@ def get_product_analysis(request):
                 output_field=DecimalField()
             )
         ).filter(
-            # INCLUIMOS SOLO PRODUCTOS CON STOCK ACTUAL > 0
-            Q(current_stock__gt=0)
+            # INCLUIMOS TODOS LOS PRODUCTOS DEL INVENTARIO, INDEPENDIENTEMENTE DEL STOCK
+            Q(initial_balance__gt=0) | Q(current_stock__isnull=False) | Q(current_stock__gte=0)
         )
     except Exception as e:
         logger.error(f"Error in product analysis query: {str(e)}", exc_info=True)

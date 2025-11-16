@@ -36,6 +36,7 @@ class _DashboardPageState extends State<DashboardPage>
   List<Map<String, dynamic>> filteredMovements = [];
   Map<String, dynamic>? summary;
   bool isLoading = true;
+  bool hasBaseData = false; // Track if base data has been uploaded
   final int _tabsCount = 3; // Number of tabs
 
   // Filtros
@@ -120,6 +121,9 @@ class _DashboardPageState extends State<DashboardPage>
             if (!mounted) return;
             // Close loading dialog
             Navigator.of(context).pop();
+            setState(() {
+              hasBaseData = true; // Mark that base data has been uploaded
+            });
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -193,7 +197,7 @@ class _DashboardPageState extends State<DashboardPage>
       print('[_pickAndUploadFile] Attempting to pick files...');
       FilePickerResult? result = await getPlatformFilePicker().pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['xlsx'],
+        allowedExtensions: ['xlsx', 'xls'],
       );
 
       if (result != null) {
@@ -395,6 +399,21 @@ class _DashboardPageState extends State<DashboardPage>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const SizedBox(height: 60),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                'statics/images/logo_geoflora.png',
+                height: 50,
+              ),
+              const SizedBox(width: 10),
+              SvgPicture.asset(
+                'statics/images/Logo_SBTale.svg',
+                height: 50,
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
           Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 20),
           const Text(
@@ -627,21 +646,30 @@ class _DashboardPageState extends State<DashboardPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Distribución por Grupo',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Distribución por Grupo',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Image.asset(
+                            'statics/images/logo_geoflora.png',
+                            height: 30,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       SizedBox(
-                        height: 250,
+                        height: 350,
                         child: SfCircularChart(
-                          legend: Legend(
+                          legend: const Legend(
                             isVisible: true,
                             position: LegendPosition.bottom,
-                            textStyle: const TextStyle(
+                            textStyle: TextStyle(
                               color: Colors.black87,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
@@ -683,7 +711,7 @@ class _DashboardPageState extends State<DashboardPage>
                                 labelPosition: ChartDataLabelPosition.outside,
                                 connectorLineSettings: ConnectorLineSettings(
                                   type: ConnectorType.curve,
-                                  length: '20%',
+                                  length: '25%',
                                   color: Colors.grey.shade600,
                                   width: 1.5,
                                 ),
@@ -718,21 +746,30 @@ class _DashboardPageState extends State<DashboardPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Distribución por Rotación',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Distribución por Rotación',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Image.asset(
+                            'statics/images/logo_geoflora.png',
+                            height: 30,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       SizedBox(
                         height: 250,
                         child: SfCircularChart(
-                          legend: Legend(
+                          legend: const Legend(
                             isVisible: true,
                             position: LegendPosition.bottom,
-                            textStyle: const TextStyle(
+                            textStyle: TextStyle(
                               color: Colors.black87,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
@@ -819,15 +856,15 @@ class _DashboardPageState extends State<DashboardPage>
                 SizedBox(
                   height: 300,
                   child: SfCartesianChart(
-                    primaryXAxis: CategoryAxis(
-                      labelStyle: const TextStyle(
+                    primaryXAxis: const CategoryAxis(
+                      labelStyle: TextStyle(
                         color: Colors.black87,
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
                       ),
-                      axisLine: const AxisLine(width: 1, color: Colors.grey),
-                      majorTickLines: const MajorTickLines(size: 0),
-                      majorGridLines: const MajorGridLines(width: 0),
+                      axisLine: AxisLine(width: 1, color: Colors.grey),
+                      majorTickLines: MajorTickLines(size: 0),
+                      majorGridLines: MajorGridLines(width: 0),
                       labelRotation: 45,
                     ),
                     primaryYAxis: NumericAxis(
@@ -845,7 +882,7 @@ class _DashboardPageState extends State<DashboardPage>
                       majorGridLines: MajorGridLines(
                         width: 0.5,
                         color: Colors.grey.shade200,
-                        dashArray: [5, 5],
+                        dashArray: const [5, 5],
                       ),
                       title: const AxisTitle(
                         text: 'Valor (\$)',
@@ -857,7 +894,7 @@ class _DashboardPageState extends State<DashboardPage>
                       ),
                     ),
                     plotAreaBorderWidth: 0,
-                    legend: Legend(
+                    legend: const Legend(
                       isVisible: false,
                     ),
                     tooltipBehavior: TooltipBehavior(
@@ -882,9 +919,9 @@ class _DashboardPageState extends State<DashboardPage>
                         pointColorMapper:
                             (MapEntry<String, double> data, int index) =>
                                 groupColors[index % groupColors.length],
-                        dataLabelSettings: DataLabelSettings(
+                        dataLabelSettings: const DataLabelSettings(
                           isVisible: true,
-                          textStyle: const TextStyle(
+                          textStyle: TextStyle(
                             color: Colors.black87,
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
@@ -1302,15 +1339,14 @@ class _DashboardPageState extends State<DashboardPage>
                 _pickAndUploadFile();
               } else if (value == 'update') {
                 _uploadUpdateFile();
-              } else if (value == 'files') {
-                _uploadFile();
               }
             },
             itemBuilder: (BuildContext context) => [
-              const PopupMenuItem(
-                value: 'base',
-                child: Text('Cargar archivo base'),
-              ),
+              if (!hasBaseData)
+                const PopupMenuItem(
+                  value: 'base',
+                  child: Text('Cargar archivo base'),
+                ),
               const PopupMenuItem(
                 value: 'update',
                 child: Text('Cargar archivo de actualización'),
@@ -2041,15 +2077,15 @@ class _DashboardPageState extends State<DashboardPage>
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-        allowMultiple: false, // Only one update file
+        allowedExtensions: ['xlsx', 'xls'],
+        allowMultiple: true, // Allow multiple update files
       );
 
       if (result == null || result.files.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Debe seleccionar un archivo de actualización (.xlsx).',
+              'Debe seleccionar al menos un archivo de actualización (.xlsx o .xls).',
             ),
             backgroundColor: Colors.orange,
           ),
@@ -2057,7 +2093,7 @@ class _DashboardPageState extends State<DashboardPage>
         return;
       }
 
-      final file = result.files.single;
+      final files = result.files;
 
       // Show loading dialog
       bool? confirmed = await showDialog<bool>(
@@ -2070,7 +2106,7 @@ class _DashboardPageState extends State<DashboardPage>
               children: [
                 CircularProgressIndicator(),
                 SizedBox(height: 16),
-                Text('Procesando archivo de actualización...'),
+                Text('Procesando archivo(s) de actualización...'),
               ],
             ),
             actions: [
@@ -2097,10 +2133,14 @@ class _DashboardPageState extends State<DashboardPage>
           Uri.parse('http://127.0.0.1:8000/api/inventory/update/'),
         );
 
-        // Only send update file - backend will handle existing base inventory
-        request.files.add(await createMultipartFile('update_file', file));
+        // Send all update files - backend will handle multiple files and add movements
+        for (int i = 0; i < files.length; i++) {
+          request.files
+              .add(await createMultipartFile('update_files', files[i]));
+        }
 
-        print('[_uploadUpdateFile] Sending update request...');
+        print(
+            '[_uploadUpdateFile] Sending update request with ${files.length} files...');
         var response = await request.send();
         var responseData = await response.stream.bytesToString();
 
@@ -2116,9 +2156,9 @@ class _DashboardPageState extends State<DashboardPage>
             if (jsonResponse['ok']) {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
+                SnackBar(
                   content: Text(
-                    'Archivo de actualización procesado correctamente.',
+                    '${files.length} archivo(s) de actualización procesado(s) correctamente.',
                   ),
                   backgroundColor: Colors.green,
                 ),
@@ -2130,7 +2170,7 @@ class _DashboardPageState extends State<DashboardPage>
                 SnackBar(
                   content: Text(
                     jsonResponse['error'] ??
-                        'Error al procesar el archivo de actualización.',
+                        'Error al procesar los archivos de actualización.',
                   ),
                   backgroundColor: Colors.red,
                 ),
@@ -2171,159 +2211,6 @@ class _DashboardPageState extends State<DashboardPage>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error al procesar el archivo de actualización: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _uploadFile() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-        allowMultiple: true, // Allow picking multiple files
-      );
-
-      if (result == null || result.files.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Debe seleccionar al menos un archivo (.xlsx).'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      final files = result.files;
-      if (files.length > 2) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Puede seleccionar máximo 2 archivos.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      // Show loading dialog
-      bool? confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            content: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Procesando archivos...'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop(false);
-                },
-                child: const Text('Cancelar'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop(true);
-                },
-                child: const Text('Confirmar'),
-              ),
-            ],
-          );
-        },
-      );
-
-      if (confirmed == true) {
-        var request = http.MultipartRequest(
-          'POST',
-          Uri.parse('http://127.0.0.1:8000/api/inventory/update/'),
-        );
-
-        // Add files to request - backend will handle the logic
-        for (int i = 0; i < files.length; i++) {
-          if (i == 0) {
-            request.files.add(await createMultipartFile('base_file', files[i]));
-          } else if (i == 1) {
-            request.files.add(
-              await createMultipartFile('update_file', files[i]),
-            );
-          }
-        }
-
-        print('[_uploadFile] Sending update request...');
-        var response = await request.send();
-        var responseData = await response.stream.bytesToString();
-
-        print('[_uploadFile] Raw response: $responseData');
-
-        if (response.statusCode == 200) {
-          try {
-            var jsonResponse = json.decode(responseData);
-            print(
-              '[_uploadFile] Response status: ${response.statusCode}, body: $jsonResponse',
-            );
-
-            if (jsonResponse['ok']) {
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Archivos subidos y procesados correctamente.'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-              await _loadData(); // Reload data after successful upload
-            } else {
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    jsonResponse['error'] ?? 'Error al procesar los archivos.',
-                  ),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            }
-          } catch (jsonError) {
-            print('[_uploadFile] JSON decode error: $jsonError');
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Error al procesar respuesta del servidor: $jsonError',
-                ),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        } else {
-          print('[_uploadFile] HTTP error: ${response.statusCode}');
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error HTTP ${response.statusCode}: $responseData'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Operación cancelada por el usuario.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al procesar los archivos: $e'),
             backgroundColor: Colors.red,
           ),
         );

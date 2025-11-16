@@ -1,3 +1,4 @@
+import 'dart:io' as io;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geo_inventario/file_platform_web.dart';
@@ -61,7 +62,11 @@ Future<List<int>?> getFileBytes(PlatformFile platformFile) async {
   if (kIsWeb) {
     return getFileBytesWeb(platformFile);
   } else {
-    return getFileBytes(platformFile);
+    if (platformFile.path != null) {
+      final file = io.File(platformFile.path!);
+      return await file.readAsBytes();
+    }
+    return null;
   }
 }
 
@@ -71,6 +76,22 @@ Future<http.MultipartFile> createMultipartFile(
   if (kIsWeb) {
     return createMultipartFileWeb(field, platformFile);
   } else {
-    return createMultipartFile(field, platformFile);
+    // IO platform implementation
+    if (platformFile.path != null) {
+      // Use fromPath for better memory efficiency with large files
+      return await http.MultipartFile.fromPath(
+        field,
+        platformFile.path!,
+        filename: platformFile.name,
+      );
+    } else if (platformFile.bytes != null) {
+      return http.MultipartFile.fromBytes(
+        field,
+        platformFile.bytes!,
+        filename: platformFile.name,
+      );
+    } else {
+      throw Exception('No file path or bytes available for IO platform.');
+    }
   }
 }
